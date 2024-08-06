@@ -1,0 +1,72 @@
+---
+apiVersion: flink.apache.org/v1beta1
+kind: FlinkDeployment
+metadata:
+  name: demo-flink
+  namespace: flink
+spec:
+  image: container.repository.cloudera.com/cloudera/flink:1.18.1-csaop1.0.0-b317
+  flinkVersion: v1_18
+  flinkConfiguration:
+    taskmanager.numberOfTaskSlots: "4"
+    kubernetes.jobmanager.cpu.limit-factor: "20"
+    kubernetes.taskmanager.cpu.limit-factor: "20"
+  serviceAccount: flink
+  mode: native
+  jobManager:
+    resource:
+      memory: 1024Mi
+      cpu: 0.4
+  taskManager:
+    resource:
+      memory: 1024Mi
+      cpu: 0.4
+  job:
+    entryClass: com.cloudera.streaming.examples.flink.KafkaDataGeneratorJob
+    args: ["--rowsPerSec", "10", "--bootstrapServer", "demo-kafka-kafka-bootstrap.kafka.svc.cluster.local:9092", "--topic", "demo-topic"]
+    jarURI: local:///jarfiles/job.jar
+    parallelism: 4
+    state: running
+    upgradeMode: stateless
+
+### OpenShift:
+#  ingress:
+#    template: "flink-web.apps.dim-operators.rn0l.p1.openshiftapps.com/{{namespace}}/{{name}}/"
+#    annotations:
+#      haproxy.router.openshift.io/rewrite-target: /
+### Vanilla k8s:
+  ingress:
+    className: nginx
+    template: "k8s.35.227.82.180.nip.io/{{namespace}}/{{name}}(/|$)(.*)"
+    annotations:
+      nginx.ingress.kubernetes.io/rewrite-target: "/$2"
+
+  podTemplate:
+    spec:
+      imagePullSecrets:
+        - name: csa-secret
+      initContainers:
+        - name: init-jar-downloader
+          image: appropriate/curl
+          args:
+            - "-o"
+            - "/jarfiles/job.jar"
+            - "http://demo-nginx-service.default.svc.cluster.local:31080/files/flink-kubernetes-tutorial-1.18.0-csaop1.0.0-SNAPSHOT.jar"
+          volumeMounts:
+            - name: jar-files
+              mountPath: /jarfiles
+      containers:
+        - name: flink-main-container
+          volumeMounts:
+            - name: jar-files
+              mountPath: /jarfiles
+      volumes:
+        - name: jar-files
+          ephemeral:
+            volumeClaimTemplate:
+              spec:
+                accessModes:
+                  - ReadWriteOnce
+                resources:
+                  requests:
+                    storage: 1Gi
